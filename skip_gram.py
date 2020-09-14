@@ -8,44 +8,55 @@ import pandas as pd
 import os
 
 # 分词
-input_words = []
-f = open('5.5w_vector.txt','r',encoding= 'utf-8')
-content = f.read().split()
-aftersplit = []
-for i in content:
-    text_cut = jieba.cut(i)
-    string = ' '.join(text_cut)
-    aftersplit.append(string)
-    str_list = string.split(' ')
-    for j in str_list:
-        input_words.append(j)
+def create_words_sentences(file): 
+    input_words = []
+    aftersplit = []
+    f = open(file,'r',encoding= 'utf-8')
+    content = f.read().split()
+    for i in content:
+        text_cut = jieba.cut(i)
+        string = ' '.join(text_cut)
+        aftersplit.append(string)
+        str_list = string.split(' ')
+        for j in str_list:
+            input_words.append(j)
+
+    return input_words, aftersplit
 
 # 词数转换
-word2int = {}
-set_words = set(input_words)
-for i,word in enumerate(set_words):
-    word2int[word] = i
+def word2int_int2word(wordlist):
+    word2int = {}
+    set_words = set(wordlist)
+    for i,word in enumerate(set_words):
+        word2int[word] = i
     
-int2word = dict([(value,key) for key, value in word2int.items()])
+    int2word = dict([(value,key) for key, value in word2int.items()])
+
+    return word2int, int2word, len(set_words),set_words
 
 # 把句子分成一个一个的类似英文的格式
-sentences = []
-for sentence in aftersplit:
-    sentences.append(sentence.split())
+def split_like_English(splitted_sentence):
+    sentences = []
+    for sentence in splitted_sentence:
+        sentences.append(sentence.split())
 
-# 构建center/target   
-WINDOW_SIZE = 2
-data = []
-for sentence in sentences:
-    for idx, word in enumerate(sentence):
-        for neighbor in sentence[max(idx - WINDOW_SIZE, 0) : min(idx + WINDOW_SIZE, len(sentence)) + 1] : 
-            if neighbor != word:
-                data.append([word, neighbor])
+    return sentences
 
-                
-for i in range(len(data)):
-    for j in range(len(data[i])):
-        data[i][j]=word2int[data[i][j]]
+# 构建center/target
+def get_data(sentences, word_num_dict, window_size):
+    data = []
+    for sentence in sentences:
+        for idx, word in enumerate(sentence):
+            for neighbor in sentence[max(idx - window_size, 0) : min(idx + window_size, len(sentence)) + 1] : 
+                if neighbor != word:
+                    data.append([word, neighbor])
+
+                    
+    for i in range(len(data)):
+        for j in range(len(data[i])):
+            data[i][j]=word_num_dict[data[i][j]]
+
+    return data
 
 # batch generation
 def get_batch_data(data,batch_size):
@@ -116,9 +127,9 @@ class skipgram(object):
         self.saver.restore(self.sess, self.checkpoint_file)
         
 
-def test(model,session):
+def test(model,session,num_tests,num_top,length, set_words,word2int,int2word):
     model.load_models()
-    test_index = np.random.randint(0,len(set_words),8)
+    test_index = np.random.randint(0,length,num_tests)
     test_words = []
     
     norm = session.run(model.norm)
@@ -135,12 +146,17 @@ def test(model,session):
         int_ = np.reshape(int_,[1])
         predicted = session.run(model.embed,feed_dict = {model.center_words:int_})
         similarity = np.matmul(predicted, np.transpose(normalized_mat))
-        c = (-similarity).argsort()[0:8]
-        for j in range(8):
+        c = (-similarity).argsort()[0:num_top]
+        for j in range(num_top):
             close_word = int2word[list(c[0])[j]]
             print(i,close_word)
     
-    np.savetxt('embedding.txt',matrix)
+    word_array = np.reshape(list(set_words),[length,1])
+    final_matrix = np.hstack((word_array, matrix))
+    matrix_df = pd.DataFrame(final_matrix)
+    
+    
+    #matrix_df.to_csv('embedding.csv',sep = ' ', index = False, header = False)
 
 
 def main():
@@ -152,11 +168,18 @@ def main():
     NUM_SAMPLED = 64 # Number of negative examples to sample
     LEARNING_RATE = 0.001
     NUM_TRAINING_STEP = 1
-    SKIP_STEP = 2000
+    
+    file = '5.5w_vector.txt'
+    input_words, aftersplit = create_words_sentences(file)
+    word2int, int2word, length,set_words = word2int_int2word(input_words)
+    sentences = split_like_English(aftersplit)
+    data = get_data(sentences, word2int,SKIP_WINDOW)
+    
+    
     
     
 
-    model = skipgram(len(set_words),BATCH_SIZE,EMBED_SIZE,NUM_SAMPLED,LEARNING_RATE,session)
+    model = skipgram(length,BATCH_SIZE,EMBED_SIZE,NUM_SAMPLED,LEARNING_RATE,session)
     session.run(tf.global_variables_initializer())
     
     for i in range(NUM_TRAINING_STEP):
@@ -170,7 +193,7 @@ def main():
     
         
     
-    test(model,session)
+    test(model,session,8,8,length,set_words,word2int,int2word)
     
         
 
